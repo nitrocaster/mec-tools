@@ -1,10 +1,66 @@
-/*
- * mec_csum_flasher.c: check/fix flash-time checksum
- * Should be run on the decrypted image
- */
 #include <stdio.h>
 #include <string.h>
+#include <Winsock2.h>
 #include "mmapfile.h"
+
+int checksum(unsigned char *base, unsigned int location, 
+             unsigned int start, unsigned int end, int fix)
+{
+    unsigned char *p;
+    unsigned int stored = *(unsigned int *)(base + location);
+    unsigned int csum = 0;
+
+    for (p = base+start; p < base+end; p += 4)
+        csum += *(unsigned int *)p;
+    csum = -(int)csum;
+
+    if (fix)
+        *(unsigned int *)(base+location) = csum;
+
+    printf("%08x %08x %s\n", stored, csum, (stored!=csum)?(fix?"FIXED":"FAIL"):"OK");
+    return (stored!=csum)&&!fix;
+}
+
+/*
+* check/fix boot-time checksums
+* Should be run on the decrypted image
+*/
+int main_boot(int argc, char *argv[])
+{
+    size_t length;
+    unsigned char *base;
+    int fix, r;
+
+    if ((argc >= 3) && (strcmp(argv[1], "-f") == 0))
+        fix = 1;
+    else if ((argc >= 3) && (strcmp(argv[1], "-c") == 0))
+        fix = 0;
+    else
+    {
+        fprintf(stderr, "usage: %s {-f|-c} file\n", argv[0]);
+        return 1;
+    }
+
+    base = mmapfile(argv[2], fix?(PROT_READ|PROT_WRITE):PROT_READ, MAP_SHARED, &length);
+    if (base == MAP_FAILED)
+    {
+        perror("mmapfile");
+        return 1;
+    }
+
+    if (*(unsigned int *)base != 0x0f802020)
+    {
+        fprintf(stderr, "you should run this on the unencrypted image\n");
+        return 1;
+    }
+
+    r  = checksum(base, 0x2048, 0, 0x2048, fix);
+    r |= checksum(base, 0x204c, 0x2080, 0x10000, fix);
+    r |= checksum(base, 0x2050, 0x10000, 0x20000, fix);
+    r |= checksum(base, 0x2054, 0x20000, 0x2e000, fix);
+    munmap(base, length);
+    return r;
+}
 
 unsigned short crc16_table[256] = {
     0x0000, 0x1021, 0x2042, 0x3063, 0x4084, 0x50A5, 0x60C6, 0x70E7, 0x8108, 0x9129, 0xA14A, 0xB16B, 0xC18C, 0xD1AD, 0xE1CE, 0xF1EF, 
@@ -25,7 +81,11 @@ unsigned short crc16_table[256] = {
     0xEF1F, 0xFF3E, 0xCF5D, 0xDF7C, 0xAF9B, 0xBFBA, 0x8FD9, 0x9FF8, 0x6E17, 0x7E36, 0x4E55, 0x5E74, 0x2E93, 0x3EB2, 0x0ED1, 0x1EF0
 }; 
 
-int main(int argc, char *argv[])
+/*
+* check/fix flash-time checksum
+* Should be run on the decrypted image
+*/
+int main_flasher(int argc, char *argv[])
 {
     size_t length;
     unsigned char *base;
@@ -69,4 +129,75 @@ int main(int argc, char *argv[])
  
     printf("%04x %04x %s\n", stored, csum, (stored!=csum)?(fix?"FIXED":"FAIL"):"OK");
     return (stored!=csum)&&!fix;
+}
+
+/*
+* check/fix outer checksum
+* Should be run on the encrypted image
+*/
+int main_outer(int argc, char *argv[])
+{
+    size_t length;
+    unsigned char *base;
+    unsigned char *p, *end;
+    unsigned short csum = 0;
+    unsigned short stored;
+    int fix;
+
+    if ((argc >= 3) && (strcmp(argv[1], "-f") == 0))
+        fix = 1;
+    else if ((argc >= 3) && (strcmp(argv[1], "-c") == 0))
+        fix = 0;
+    else
+    {
+        fprintf(stderr, "usage: %s {-f|-c} file\n", argv[0]);
+        return 1;
+    }
+
+    base = (unsigned char *)mmapfile(argv[2], fix?(PROT_READ|PROT_WRITE):PROT_READ, MAP_SHARED, &length);
+    if (base == MAP_FAILED)
+    {
+        perror("mmapfile");
+        return 1;
+    }
+
+    if (*(unsigned int *)base == 0x0f802020)
+    {
+        fprintf(stderr, "you should run this on the encrypted image\n");
+        return 1;
+    }
+
+    end = base + length;
+    for (p = base; p < end-2; p+=2)
+        csum += ntohs(*(unsigned short *)p);
+    csum = -csum;
+    csum = htons(csum);
+
+    stored = *(unsigned short *)p;
+    if (fix)
+        *(unsigned short *)p = csum;
+
+    printf("%04x %04x %s\n", stored, csum, (stored!=csum)?(fix?"FIXED":"FAIL"):"OK");
+    return (stored!=csum)&&!fix;
+}
+
+int main(int argc, char *argv[])
+{
+    int(*fn)(int, char *[]) = NULL;
+    if (argc == 4)
+    {
+        if (!strcmp(argv[1], "boot"))
+            fn = main_boot;
+        if (!strcmp(argv[1], "flasher"))
+            fn = main_flasher;
+        if (!strcmp(argv[1], "outer"))
+            fn = main_outer;
+    }
+    if (!fn)
+    {
+        printf("usage: %s {boot|flasher|outer} {-f|-c} file\n", argv[0]);
+        return 1;
+    }
+    argv[1] = argv[0];
+    return fn(argc-1, argv+1);
 }

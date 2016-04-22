@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <openssl/blowfish.h>
+#include "compat.h"
+#include "mman.h"
 #include "mmapfile.h"
 
 static const BF_KEY key = {{
@@ -147,18 +149,19 @@ int main(int argc, char *argv[])
 {
     size_t length;
     unsigned char *base;
+    int dst;
     unsigned char out[0x3000-0xff0];
     unsigned char thisiv[8];
     ssize_t r;
     int enc;
 
-    if ((argc >= 3) && (strcmp(argv[1], "-e") == 0))
+    if ((argc >= 4) && (strcmp(argv[1], "-e") == 0))
         enc = 1;
-    else if ((argc >= 3) && (strcmp(argv[1], "-d") == 0))
+    else if ((argc >= 4) && (strcmp(argv[1], "-d") == 0))
         enc = 0;
     else
     {
-        fprintf(stderr, "usage: %s {-e|-d} file\n", argv[0]);
+        fprintf(stderr, "usage: %s {-e|-d} src dst\n", argv[0]);
         return 1;
     }
 
@@ -168,15 +171,22 @@ int main(int argc, char *argv[])
         perror("mmapfile");
         return 1;
     }
-
+    dst = _open(argv[3], O_CREAT|O_WRONLY|O_BINARY, S_IREAD|S_IWRITE);
+    if (dst == -1)
+    {
+        printf("can't open file: %s (%s)\n", argv[3], strerror(errno));
+        munmap(base, length);
+        return 1;
+    }
     memcpy(thisiv, iv, 8);
     BF_cbc_encrypt(base, out, 0x200, &key, thisiv, enc);
-    r = write(STDOUT_FILENO, out, 0x200);
-    r += write(STDOUT_FILENO, base+0x200, 0xff0-0x200);
+    r = _write(dst, out, 0x200);
+    r += _write(dst, base+0x200, 0xff0-0x200);
     memcpy(thisiv, iv, 8);
     BF_cbc_encrypt(base+0xff0, out, 0x3000-0xff0, &key, thisiv, enc);
-    r += write(STDOUT_FILENO, out, 0x3000-0xff0);
-    r += write(STDOUT_FILENO, base+0x3000, length-0x3000);
+    r += _write(dst, out, 0x3000-0xff0);
+    r += _write(dst, base+0x3000, length-0x3000);
     munmap(base, length);
+    _close(dst);
     return (r!=length);
 }

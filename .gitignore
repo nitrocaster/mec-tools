@@ -1,3 +1,11 @@
+# Exclude all dot files except .gitignore
+.*
+!.gitignore
+
+# Build results
+bin/
+intermediate/
+
 # Object files
 *.o
 *.ko

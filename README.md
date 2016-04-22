@@ -1,6 +1,4 @@
-###Tools for modifying Lenovo embedded controller firmware
-
-Run make to build (requires OpenSSL).
+###Tools for modifying Lenovo embedded controller firmware - version for Windows
 
 To extract an EC firmware image from the BIOS update file:
 
@@ -11,7 +9,7 @@ dd if=\$01DA000.FL2 of=mec.bin bs=4096 skip=1280 count=48
 To decrypt an EC firmware image:
 
 ```sh
-./mec_encrypt -d mec.bin >mec-decrypted.bin
+./mec_encrypt -d mec.bin mec-decrypted.bin
 ```
 
 To reencrypt the image after modification, fixing checksums:
